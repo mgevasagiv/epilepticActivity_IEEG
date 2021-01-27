@@ -2,10 +2,8 @@
 
 This toolbox was designed for detecting pathological activity (interictal spikes) in iEEG data recorded from epileptic patients. 
 Several methods for spikes detection are implemented in the class, the commonly used one that - detectTimes. 
-Its basic idea is to find points in the data which satisfy one of several conditions regarding values of -
--- amplitude after bandpass, 
--- unfiltered amplitude 
--- gradient  
+Its basic idea is to find points in the data which pass one or more thresholds of -
+(i) amplitude following highpass; (ii) unfiltered amplitude (iii) signal gradient.  
 
 
 Other methods which were implemented - 
