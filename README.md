@@ -1,4 +1,4 @@
-# epilepticActivity_IEEG
+# epilepticActivity_IEEG (Drs. Maya Geva-Sagiv and Shdema Epstein)
 
 This toolbox was designed for detecting pathological activity (interictal spikes) in iEEG data recorded from epileptic patients. 
 Several methods for spikes detection are implemented in the class, the commonly used is - detectTimes. 
