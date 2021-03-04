@@ -4,7 +4,7 @@ classdef SpikeWaveDetector < handle
         
         %general constants
         samplingRate = 1000;
-        minDistSpikes = 200; % minimal distance for 'different' spikes - in miliseconds
+        minDistSpikes = 50; % minimal distance for 'different' spikes - in miliseconds
         
         %plotting constants
         plotBeforeAfter = 5000; %constant for the plotting method - how much to plot before and after the peak, in ms
@@ -14,25 +14,31 @@ classdef SpikeWaveDetector < handle
         %thresholds for the standard deviation are based on the papers
         %Andrillon et al (envelope condition) and Starestina et al (other
         %conditions)
-        SDthresholdEnv = 8; %threshold in standard deviations for the envelope after bandpass (HP)
-        SDthresholdAmp = 5; %threshold in standard deviations for the amplitude
-        SDthresholdGrad = 5; %threshold in standard deviations for the gradient
-        SDthresholdConjAmp = 3; %threshold in standard deviations for the amplitude for the conjunction of amp&grad condition
-        SDthresholdConjGrad = 3; %threshold in standard deviations for the gradient for the conjunction of amp&grad condition
-        SDthresholdConjEnv = 3; %threshold in standard deviations for the HP for the conjunction of amp&HP condition
+        SDthresholdEnv = 5; %threshold in standard deviations for the envelope after bandpass (HP)
+        SDthresholdAmp = 20; %threshold in standard deviations for the amplitude
+        SDthresholdGrad = 20; %threshold in standard deviations for the gradient
+        SDthresholdConjAmp = 5; %threshold in standard deviations for the amplitude for the conjunction of amp&grad condition
+        SDthresholdConjGrad = 5; %threshold in standard deviations for the gradient for the conjunction of amp&grad condition
+        SDthresholdConjEnv = 5; %threshold in standard deviations for the HP for the conjunction of amp&HP condition
         useEnv = true;
         useAmp = true;
         useGrad = true;
         useConjAmpGrad = true;
         useConjAmpEnv = true;
         isDisjunction = true;
-        blockSizeSec = 10; % filter and find peaks at blocks of X seconds - based on Andrillon et al
+        blockSizeSec = 30; % filter and find peaks at blocks of X seconds - based on Andrillon et al
         
-        %the bandpass range is based on Andrillon et al
-        lowCut = 50; %low bound for band pass
-        highCut = 150; %high bound for band pass
+        %         %the bandpass range is based on Andrillon et al
+        %         lowCut = 50; %low bound for band pass
+        %         highCut = 150; %high bound for band pass
+        %         minLengthSpike = 5; %a spike is detected if there are points for X ms passing the threshold - in ms, based on Andrillon et al
+
+        %the highpass range is based on Staresina et al 
+        lowCut = 250;  % low bound for high pass (Staresina)
+        highCut = inf; % high bound for band pass
+        minLengthSpike = 5;
+        maxLengthSpike = 70; % mSec % Andrillon
         
-        minLengthSpike = 5; %a spike is detected if there are points for X ms passing the threshold - in ms, based on Andrillon et al
         conditionsArrayTrueIfAny = false;
         percentageOfNansAllowedArounsSpike = 0.1; % how many NaNs are allowed in the vicinity of the spike (vicinity = minDistSpikes/2 before and after)
         HighBandPassScore = 11; % this is for debugging - finding especially high STDs for HP
@@ -66,6 +72,25 @@ classdef SpikeWaveDetector < handle
         threshMah = 200;
         nanThresh = 0.5;
         
+        %%Population data
+        minNIIS = 30;
+        shortTimeRangeAfterStim = 3;%seconds
+        midTimeRangeAfterStim = 60; %seconds
+        stimulusDuration = 50; %ms
+        avgRippleBeforeAfter = 1; %second
+        freqoiForAvgSpec = [0:0.5:10];
+        freqRangeForAvgSpec = [1:250];
+        timeBeforeAfterEventRipSpec = 1; %second
+        timeForBaselineRip = 1; %second
+        minNCycles = 5;
+        minWinSizeSpec = 100; %ms
+        
+        %STIMULATION removal constants
+        windowAroundSTIM = 200; %ms
+        windowSpikeRateAroundRip = 500; % ms 
+        
+        % sleep scoring
+        NREM = 1;
         
     end
     
@@ -73,7 +98,7 @@ classdef SpikeWaveDetector < handle
         
         %% frequency analysis detection
         
-        function [peakTimes, peakStats] = detectTimes(obj, data, returnPeakStats)
+        function [peakTimes, peakStats] = detectTimes(obj, data, returnPeakStats, sleepScoringVec)
             
             %Frequency analysis - based on Selective neuronal lapses precede human cognitive lapses
             %following sleep deprivation, Nir et al, 2017
@@ -103,6 +128,12 @@ classdef SpikeWaveDetector < handle
             %each peak stores the maximal zscores of HP (index 1),
             %amplitude (index 2), and gradient (index 3) for that peak.
             
+             if nargin < 4
+                useSleepScoring = 0;
+             else
+                 useSleepScoring = 1;
+             end
+            
             if nargin < 3
                 returnPeakStats = false;
             end
@@ -120,6 +151,13 @@ classdef SpikeWaveDetector < handle
             originalData = data;
             data(isnan(data)) = 0;
             
+            % Detect IIS on NREM sleep
+            if useSleepScoring
+                sleepScoring = sleepScoringVec;
+                data(sleepScoring ~= obj.NREM) = 0;
+            end
+            zsAmp_all = zscore(data); % zscore over the entire NREM session   
+            
             pointsInBlock = obj.blockSizeSec*obj.samplingRate;
             nBlocks = floor(length(data)/pointsInBlock);
             ind = 1;
@@ -133,7 +171,9 @@ classdef SpikeWaveDetector < handle
                 
                 % amplitude
                 if obj.useAmp || obj.useConjAmpGrad || obj.useConjAmpEnv
-                    zsAmp = zscore(currBlock);
+                    zsAmp = zsAmp_all((iBlock-1)*pointsInBlock+1:iBlock*pointsInBlock); 
+                                % Nov 20, changing from block-based z-scoring 
+                                %         (that detected many spindles) to NREM-vec zscoring
                     pointsPassedThreshAmplitude = zsAmp > obj.SDthresholdAmp;
                     pointsPassedThreshAmplitudeLowThresh = zsAmp > obj.SDthresholdConjAmp;
                 else
@@ -841,7 +881,6 @@ classdef SpikeWaveDetector < handle
         function BP = bandpass(obj, timecourse, SamplingRate, low_cut, high_cut, filterOrder)
             
             %bandpass code - from Maya
-            
             if (nargin < 6)
                 filterOrder = obj.defaultFilterOrder;
             end
@@ -853,8 +892,11 @@ classdef SpikeWaveDetector < handle
             end
             timecourse(indices) = 0;
             %
-            
-            [b, a] = butter(filterOrder, [(low_cut/SamplingRate)*2 (high_cut/SamplingRate)*2]);
+            if high_cut == inf
+                [b, a] = butter(filterOrder,(low_cut/SamplingRate)*2,'high');
+            else
+                [b, a] = butter(filterOrder, [(low_cut/SamplingRate)*2 (high_cut/SamplingRate)*2]);
+            end
             BP = filtfilt(b, a, timecourse );
             BP(indices) = NaN;
         end
@@ -985,6 +1027,259 @@ classdef SpikeWaveDetector < handle
             end
         end
         
+        
+        
+        function results = runIISData(obj, runData, fileNameResults, whatTorun)
+            
+            % The method produces information about the IISs in a channel that includes:
+            % A. Average IIS - before stimulation and during stimulations (short effect).
+            % B. Spectrum of average IIS - before stimulation and during stimulations (short effect).
+            % C. Average of TFR around IIS - before stimulation and during stimulations (short effect).
+            
+            % The input runData is a struct in the length of number of patients (for which the analysis is required).
+            % In addition it receives the input parameter fileNameResults which includes the file name into which the results
+            % will be saved (optional).
+            % Each element (=patient) in runData should include the fields:
+            % patientName
+            % channelsToRunOn - list of channel indices for which to perform the analysis.
+            % DataFolder � The folder in which the raw data files are saved (the method assumes the prefix for the files is
+            % CSC, can be changed by the property dataFilePrefix).
+            % macroMontageFileName - the file name (including path) of the macromontage.
+            % RipplesFileNames - name (including path) of the ripple mat files in which the ripple times for the macro
+            % channels are saved (the method assumes the name of the file is RipplesFileNames <#channel index>
+            % SpindlesFileNames - name (including path) of the spindle mat files in which the spindle times for the macro
+            % channels are saved (the method assumes the name of the file is SpindlesFileNames <#channel index>
+            % SpikesFileNames - name (including path) of the spikes mat files in which the spikes times for the macro channels
+            % are saved (the method assumes the name of the file is SpikesFileNames <#channel index>). If not provided spikes
+            % will not be removed from the data for the analysis.
+            % sleepScoringFileName � file name (including path) of the sleep scoring mat file. If not provided all the data will be used.
+            %
+            % The output struct results includes all the results of the analysis, which can then be plotted using
+            % plotResultsRipplesData. The output struct is a struct with the length of the number of patients (=the length
+            % of runData), where each element includes:
+            % patientName
+            % resultsPerChan � a struct in the length of the number of channels required for the analysis per the patient.
+            % Each element in resultsPerChan includes the fields:
+            % channelNum
+            % area
+            % nIIS_Before, nIIS_Stim - number of IIS before stimulations and after stimulations (short effect)
+            % respectively
+            % avgBefore, avgStim � average IIS before stimulations and after stimulations (short effect) respectively
+            % stdBefore, stdStim � std of IIS before stimulations and after stimulations (short effect) respectively
+            % specBefore, specStim � spectrum of IIS average before stimulations and after stimulations (short effect)
+            % respectively
+            % meanTFRRipBefore, meanTFRRipStim � mean of ripple triggered TFR before stimulations and after stimulations
+            % (short effect) respectively
+            
+            
+            if nargin < 3
+                fileNameResults = '';
+            end
+            
+            removeIIS = 1; 
+            removeSTIM_artifacts = 1;
+            
+            shortTimeRangeAfterStim = obj.shortTimeRangeAfterStim*obj.samplingRate;
+            midTimeRangeAfterStim = obj.midTimeRangeAfterStim*obj.samplingRate;
+            stimulusDuration = obj.stimulusDuration*obj.samplingRate/1000;
+            avgRippleBeforeAfter = obj.avgRippleBeforeAfter*obj.samplingRate;
+            timeWin = min((1./obj.freqRangeForAvgSpec)*obj.minNCycles,ones(size(obj.freqRangeForAvgSpec))*obj.minWinSizeSpec);
+            
+            nPatients = length(runData);
+            
+            %go over all required patients
+            for iPatient = 1:nPatients
+                disp(['Patient ',runData(iPatient).patientName,' ',num2str(iPatient),'/',num2str(nPatients)]);
+                results(iPatient).patientName = runData(iPatient).patientName;
+                
+                %load exp data for stimulation timings
+                expData = load(runData(iPatient).ExpDataFileName);
+                expData = expData.EXP_DATA;
+                stimTimes = expData.stimTiming.validatedTTL_NLX;
+                firstStim = stimTimes(1);
+                
+                %load sleep scoring
+                if isfield(runData(iPatient), 'sleepScoringFileName') && ~isempty(runData(iPatient).sleepScoringFileName)
+                    try
+                        sleepScoring = load(runData(iPatient).sleepScoringFileName);
+                        sleepScoring = sleepScoring.sleep_score_vec;
+                    catch
+                        disp([runData(iPatient).sleepScoringFileName '.mat doesn''t exist']);
+                        sleepScoring = [];
+                    end
+                end
+                
+                %load macro montage
+                macroMontage = load(runData(iPatient).macroMontageFileName);
+                macroMontage = macroMontage.MacroMontage;
+                
+                %go over required channels per patient
+                resultsPerChan = [];
+                nChans = length(runData(iPatient).channelsToRunOn);
+                for iChan = 1:nChans
+                    currChan = runData(iPatient).channelsToRunOn(iChan);
+                    resultsPerChan(iChan).channelNum = currChan;
+                    
+                    disp(['channel ',num2str(currChan),' ',num2str(iChan),'/',num2str(nChans)]);
+                    
+                    currArea = macroMontage(resultsPerChan(iChan).channelNum).Area;
+                    resultsPerChan(iChan).area = currArea;
+                    
+                    %load the data
+                    try
+                        data = [runData(iPatient).DataFolder '\CSC' num2str(currChan) '.mat'];
+                        data = load(data);
+                        data = data.data;
+                    catch
+                        disp([runData(iPatient).DataFolder '\CSC' num2str(currChan) '.mat doesn''t exist']);
+                        continue;
+                    end
+                    
+                    %load IIS times
+                    if isfield(runData(iPatient), 'SpikesFileNames') && ~isempty(runData(iPatient).SpikesFileNames)
+                        try
+                            IIStimes = [runData(iPatient).SpikesFileNames num2str(currChan) '.mat'];
+                            IIStimes = load(IIStimes);
+                            IIStimes = IIStimes.peakTimes;
+                        catch
+                            disp([runData(iPatient).SpikesFileNames num2str(currChan) '.mat doesn''t exist']);
+                            IIStimes = [];
+                        end
+                    else
+                        IIStimes = [];
+                    end
+                    % Remove IIS from data before using it for ripple
+                    % average and TFR:
+                    %remove windowAroundSTIM ms before and after every stimulation as
+                    %provided as input parameter
+                    if removeSTIM_artifacts
+                        winAroundIIS = obj.windowAroundSTIM*obj.samplingRate/1000;
+                        pointsBefore = winAroundIIS;
+                        pointsAfter = winAroundIIS;
+                        data(stimTimes-pointsBefore+1:stimTimes+pointsAfter) = nan;
+                    end
+
+                    %indices of IEE before stimulations
+                    IIS_BeforeInds = IIStimes < firstStim-obj.windowSpikeRateAroundRip;
+                    
+                    %get inds of IISs that are short and mid effect and not too
+                    %close to the stimulus
+                    dataDuration = floor(stimTimes(end))+midTimeRangeAfterStim;
+                    stimInds = zeros(1,dataDuration);
+                    %short effect
+                    for iStim = 1:length(stimTimes)
+                        stimInds(stimTimes(iStim)+stimulusDuration:stimTimes(iStim)+shortTimeRangeAfterStim) = 1;
+                    end
+                    %add also mid effect
+                    stimDiffs = diff(stimTimes);
+                    stimIndsWithMidPauseAfter = [find(stimDiffs >= midTimeRangeAfterStim) length(stimTimes)];
+                    stimIndsWithMidPauseAfterTimes = stimTimes(stimIndsWithMidPauseAfter);
+                    for iStim = 1:length(stimIndsWithMidPauseAfter)
+                        stimInds(stimIndsWithMidPauseAfterTimes(iStim)+shortTimeRangeAfterStim:stimIndsWithMidPauseAfterTimes(iStim)+midTimeRangeAfterStim) = 1;
+                    end
+                    % MGS - edge effect
+                    if (length(stimInds) > dataDuration); stimInds(dataDuration+1:end) = []; end;
+                    IndsLog = zeros(1,dataDuration);
+                    IndsLog(IIStimes(IIStimes<=dataDuration)) = 1;
+                    %inds of short and mid effect IIS
+                    IIS_DuringStimInds = ismember(IIStimes,find(IndsLog & stimInds));
+                    
+                    % designate a random t, I'll get rid of low N channels
+                    % later
+                    if isempty(IIS_BeforeInds)
+                        IIStimesBefore = avgRippleBeforeAfter+1;
+                    end
+                    if isempty(IIS_DuringStimInds)
+                        IIS_DuringStimInds = avgRippleBeforeAfter+1;
+                    end
+                    
+                    %calculate average IIS and TFRs
+                    IIStimesBefore = IIStimes(IIS_BeforeInds);
+                    IIStimesBefore(IIStimesBefore < avgRippleBeforeAfter) = [];
+                    IIStimesBefore(IIStimesBefore > length(data) ) = [];
+                    
+                    nIIS_Before = length(IIStimesBefore);
+                    
+                    IIStimesStim = IIStimes(IIS_DuringStimInds);
+                    nIIS_Stim = length(IIStimesStim);
+                    
+                    %calculate average of IIS
+                    IIS_Before = zeros(nIIS_Before,length([-avgRippleBeforeAfter:avgRippleBeforeAfter]));
+                    IIS_Stim = zeros(nIIS_Stim,length([-avgRippleBeforeAfter:avgRippleBeforeAfter]));
+                    
+                    %before stimulations
+                    for iRipple = 1:nIIS_Before
+                        IIS_Before(iRipple,:) = data(IIStimesBefore(iRipple)-avgRippleBeforeAfter:IIStimesBefore(iRipple)+avgRippleBeforeAfter);
+                    end
+                    
+                    if nIIS_Before > obj.minNIIS
+                        avgBefore = nanmean(IIS_Before);
+                        stdBefore = nanstd(IIS_Before);
+                        %spectrum of average
+                        specBefore = ft_specest_mtmfft(avgBefore,[1:length(avgBefore)]/obj.samplingRate,'freqoi',obj.freqRangeForAvgSpec,'taper','hanning');
+                        specBefore = abs(squeeze(specBefore(1,1,:,:)));
+                    else
+                        avgBefore = nan(1,size(IIS_Before,2));
+                        stdBefore = nan(1,size(IIS_Before,2));
+                        specBefore = nan(length(obj.freqoiForAvgSpec),1);
+                    end
+                    
+                    %after stimulations
+                    for iRipple = 1:nIIS_Stim
+                        IIS_Stim(iRipple,:) = data(IIStimesStim(iRipple)-avgRippleBeforeAfter:IIStimesStim(iRipple)+avgRippleBeforeAfter);
+                    end
+                    if nIIS_Stim > obj.minNIIS
+                        avgStim = nanmean(IIS_Stim);
+                        stdStim = nanstd(IIS_Stim);
+                        avgStim(isnan(avgStim)) = 0;
+                        specStim = ft_specest_mtmfft(avgStim,[1:length(avgStim)]/obj.samplingRate,'freqoi',obj.freqRangeForAvgSpec,'taper','hanning');
+                        specStim = abs(squeeze(specStim(1,1,:,:)));
+                    else
+                        avgStim = nan(1,size(IIS_Stim,2));
+                        stdStim = nan(1,size(IIS_Stim,2));
+                        specStim = nan(1,length(obj.freqoiForAvgSpec));
+                    end
+                    
+                    %get IIS centered TFRs (implemented in
+                    %PACCalculator)
+                    if whatTorun.TFR_calc
+                        pacCalc = PACCalculator;
+                        pacCalc.freqRange = obj.freqRangeForAvgSpec;
+                        pacCalc.timeBeforeAfterEvent = obj.timeBeforeAfterEventRipSpec; %seconds
+                        pacCalc.timeForBaseline = obj.timeForBaselineRip; %seconds, from Starestina et al
+                        pacCalc.minNCycles = obj.minNCycles;
+                        
+                        meanTFRRipBefore = pacCalc.plotAvgSpecDiff(data, IIStimesBefore);
+                        meanTFRRipStim = pacCalc.plotAvgSpecDiff(data, IIStimesStim);
+                    end
+                    
+                    resultsPerChan(iChan).nIIS_Before = nIIS_Before;
+                    resultsPerChan(iChan).nIIS_Stim = nIIS_Stim;
+                    
+                    resultsPerChan(iChan).avgBefore = avgBefore;
+                    resultsPerChan(iChan).avgStim = avgStim;
+                    resultsPerChan(iChan).stdBefore = stdBefore;
+                    resultsPerChan(iChan).stdStim = stdStim;
+                    resultsPerChan(iChan).specBefore = specBefore;
+                    resultsPerChan(iChan).specStim = specStim;
+                    
+                    if whatTorun.TFR_calc 
+                        resultsPerChan(iChan).meanTFRRipBefore = meanTFRRipBefore;
+                        resultsPerChan(iChan).meanTFRRipStim = meanTFRRipStim;                    
+                    end
+                end
+                
+                results(iPatient).resultsPerChan = resultsPerChan;
+            end
+            
+            if ~isempty(fileNameResults)
+                save(fileNameResults,'results');
+            end
+            
+        end
+        
+        
+        
     end
     
     methods (Access = private)
@@ -992,12 +1287,15 @@ classdef SpikeWaveDetector < handle
             %help function for frequency analysis detection -
             %receives the vector of binary values and finds sequence of ones in length obj.minLengthSpike, which are
             %separated from each other by at least obj.minDistSpikes, returns peak
-            %times where each
+            %times where each. Remove sequences that are above
+            %obj.maxLengthSpike.
             
             %obj.minLengthSpike and minDistSpikes are in ms - translate to number of data
             %points
             numConsSpikes = round(obj.minLengthSpike*obj.samplingRate/1000);
             distSpikePoints = round(obj.minDistSpikes*obj.samplingRate/1000);
+            maxLength = round(obj.maxLengthSpike*obj.samplingRate/1000);
+            
             %finding sequences of 1's in length obj.minLengthSpike
             accDataBlock = dataThresh;
             threshInds = find(dataThresh);
@@ -1007,6 +1305,7 @@ classdef SpikeWaveDetector < handle
             seqInds = find(accDataBlock>=numConsSpikes);
             seqPeaks = [];
             peakAllInds = {};
+            rmvDet = [];
             
             %merge peaks which are close together to one spike
             if ~isempty(seqInds)
@@ -1023,13 +1322,21 @@ classdef SpikeWaveDetector < handle
                         upperLimit = seqInds(end)+numConsSpikes-1;
                     end
                     currInds = lowerLimit:upperLimit;
+                    
+                    if length(currInds) > maxLength
+                        rmvDet(end+1) = iPeak;
+                    end
+                    
                     peakAllInds{iPeak} = currInds;
                     %the point which defines a peaks is choden to be the
                     %point with the maximal data value among the points
                     %which passed the threshold
                     [~,maxPoint] = max(data(currInds));
                     seqPeaks(iPeak) = currInds(maxPoint);
+
                 end
+                seqPeaks(rmvDet) = [];
+                peakAllInds(rmvDet) = [];
             end
         end
     end
