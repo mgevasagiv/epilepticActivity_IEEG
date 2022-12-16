@@ -174,8 +174,9 @@ classdef SpikeWaveDetector < handle
                     zsAmp = zsAmp_all((iBlock-1)*pointsInBlock+1:iBlock*pointsInBlock); 
                                 % Nov 20, changing from block-based z-scoring 
                                 %         (that detected many spindles) to NREM-vec zscoring
-                    pointsPassedThreshAmplitude = zsAmp > obj.SDthresholdAmp;
-                    pointsPassedThreshAmplitudeLowThresh = zsAmp > obj.SDthresholdConjAmp;
+                                % Dec 21, bug fix - checking abs values
+                    pointsPassedThreshAmplitude = abs(zsAmp) > obj.SDthresholdAmp;
+                    pointsPassedThreshAmplitudeLowThresh = abs(zsAmp) > obj.SDthresholdConjAmp;
                 else
                     if obj.isDisjunction
                         pointsPassedThreshAmplitude = false(1,nCurrBlock);
