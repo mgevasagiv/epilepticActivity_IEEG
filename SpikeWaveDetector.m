@@ -10,10 +10,10 @@ classdef SpikeWaveDetector < handle
         plotBeforeAfter = 5000; %constant for the plotting method - how much to plot before and after the peak, in ms
         blockSizePlot = 1;
         
-        %constants for detection based on frequency analysis - the
-        %thresholds for the standard deviation are based on the papers
-        %Andrillon et al (envelope condition) and Starestina et al (other
-        %conditions)
+        % constants for detection based on frequency analysis - the
+        % thresholds for the standard deviation are based on the papers
+        % Andrillon et al (envelope condition) and Starestina et al (other
+         %conditions)
         SDthresholdEnv = 5; %threshold in standard deviations for the envelope after bandpass (HP)
         SDthresholdAmp = 20; %threshold in standard deviations for the amplitude
         SDthresholdGrad = 20; %threshold in standard deviations for the gradient
@@ -21,11 +21,11 @@ classdef SpikeWaveDetector < handle
         SDthresholdConjGrad = 5; %threshold in standard deviations for the gradient for the conjunction of amp&grad condition
         SDthresholdConjEnv = 5; %threshold in standard deviations for the HP for the conjunction of amp&HP condition
         useEnv = true;
-        useAmp = true;
-        useGrad = true;
+        useAmp = false;
+        useGrad = false;
         useConjAmpGrad = true;
-        useConjAmpEnv = true;
-        isDisjunction = true;
+        useConjAmpEnv = false;
+        isDisjunction = false;
         blockSizeSec = 30; % filter and find peaks at blocks of X seconds - based on Andrillon et al
         
         %         %the bandpass range is based on Andrillon et al
