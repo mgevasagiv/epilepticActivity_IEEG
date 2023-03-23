@@ -1,11 +1,9 @@
 IIS_det = SpikeWaveDetectorClass; % see SpikeWaveDetector.docx for details on functions and default parameters
+
+dataFolder = header.processed_MACRO; % extracted iEEG files
 % IIS_det.samplingRate default is 1kHz - update if different
 
-% UPDATE the main path for extracted iEEG files here -
-% files should be called CSC[ch id].mat and contain a variable calles data
-dataFolder = 'C:\Users\mgeva\Documents\GitHub\rippleDetection_IEEG\example\';
-
-channels = [1:67]; % channels to analyze
+channels = [1, 9, 16, 24, 31, 38, 45, 53, 60, 67]; % deepest contact for each electrode
 
 % Extract interictal activities from all channels
 clear peakTimes mlink passedConditions
